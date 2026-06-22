@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: premiacao-gerente-farmacia
+    env: static
+    staticPublishPath: ./public
+    buildCommand: ""
