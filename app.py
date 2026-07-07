@@ -297,6 +297,13 @@ def indicadores(gerente_id):
             "SELECT * FROM indicadores WHERE gerente_id=%s ORDER BY bloco, ordem, id",
             (gerente_id,),
         ).fetchall()
+        outros_gerentes = conn.execute(
+            """SELECT g.id, g.nome, g.loja FROM gerentes g
+               WHERE g.cliente_id=%s AND g.id != %s
+                 AND EXISTS (SELECT 1 FROM indicadores i WHERE i.gerente_id = g.id)
+               ORDER BY g.nome""",
+            (session["cliente_id"], gerente_id),
+        ).fetchall()
     finally:
         conn.close()
 
@@ -305,8 +312,30 @@ def indicadores(gerente_id):
         por_bloco[linha["bloco"]].append(_linha_indicador(linha))
 
     return render_template(
-        "indicadores.html", gerente=gerente, indicadores_json=json.dumps(por_bloco)
+        "indicadores.html",
+        gerente=gerente,
+        indicadores_json=json.dumps(por_bloco),
+        outros_gerentes=outros_gerentes,
     )
+
+
+@app.route("/gerentes/<int:gerente_id>/indicadores.json")
+@login_required
+def indicadores_json(gerente_id):
+    conn = db()
+    try:
+        carregar_gerente(conn, gerente_id)  # garante que pertence ao cliente logado
+        linhas = conn.execute(
+            "SELECT * FROM indicadores WHERE gerente_id=%s ORDER BY bloco, ordem, id",
+            (gerente_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    por_bloco = {"A": [], "B": [], "C": []}
+    for linha in linhas:
+        por_bloco[linha["bloco"]].append(_linha_indicador(linha))
+    return jsonify(por_bloco)
 
 
 # ───────────────────────── calculadora do mês ─────────────────────────

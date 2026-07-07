@@ -11,6 +11,21 @@
   <div class="legenda-item" style="margin-left:auto;"><span style="color:#aaa;font-size:10px;">Gatilho: se cair abaixo do Mín%, zera o bloco inteiro</span></div>
 </div>
 
+{% if outros_gerentes %}
+<div class="card no-print" style="display:flex;gap:0.75rem;align-items:flex-end;">
+  <div class="field" style="flex:1;max-width:320px;">
+    <label>Copiar indicadores de outro gerente</label>
+    <select id="sel-copiar">
+      <option value="">Selecione um gerente...</option>
+      {% for g in outros_gerentes %}
+        <option value="{{ g.id }}">{{ g.nome }}{% if g.loja %} — {{ g.loja }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="button" class="btn btn-secondary" onclick="copiarDeGerente()">Copiar</button>
+</div>
+{% endif %}
+
 <form method="post" id="form-indicadores">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -108,6 +123,20 @@ function render(bloco) {
     tbody.appendChild(tr);
   });
   atualizaSomaPeso(bloco);
+}
+
+function copiarDeGerente() {
+  const id = document.getElementById('sel-copiar').value;
+  if (!id) { alert('Selecione um gerente para copiar.'); return; }
+  if (!confirm('Isso substitui os indicadores preenchidos nesta tela (ainda não salvos) pelos do gerente selecionado. Continuar?')) return;
+
+  fetch('/gerentes/' + id + '/indicadores.json')
+    .then(r => r.json())
+    .then(dados => {
+      rows = { A: dados.A || [], B: dados.B || [], C: dados.C || [] };
+      ['A', 'B', 'C'].forEach(render);
+    })
+    .catch(() => alert('Não foi possível copiar os indicadores.'));
 }
 
 document.getElementById('form-indicadores').addEventListener('submit', function () {
