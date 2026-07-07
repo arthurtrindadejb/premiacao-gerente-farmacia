@@ -42,23 +42,41 @@ function calcularBloco(lista, tetoBloco) {
   return { total, gatilho, premios };
 }
 
-function renderBloco(bloco, tetoBloco) {
+function parseNumero(texto) {
+  const limpo = String(texto).trim().replace(',', '.');
+  const n = parseFloat(limpo);
+  return isNaN(n) ? 0 : n;
+}
+
+// Monta as linhas da tabela uma única vez (não é chamado a cada tecla digitada,
+// pra não perder o foco/cursor de quem está preenchendo o "Realizado").
+function montarBloco(bloco) {
   const tbody = document.getElementById('tbody-' + bloco);
   tbody.innerHTML = '';
-  const { total, gatilho, premios } = calcularBloco(itens[bloco], tetoBloco);
-
   itens[bloco].forEach((it, i) => {
-    const ating = atingimento(it);
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${it.nome}${it.eh_gatilho ? ' <span title="Gatilho do bloco" style="color:#c2410c;">⚑</span>' : ''}</td>
       <td>${it.meta.toLocaleString('pt-BR')}${it.inverso ? ' <small style="color:var(--gray-400);">(mín)</small>' : ''}</td>
       <td>${it.peso}%</td>
-      <td><input class="ci ci-val" type="number" step="0.01" value="${it.realizado}" data-bloco="${bloco}" data-i="${i}" oninput="alterarRealizado('${bloco}',${i},+this.value)"></td>
-      <td>${(ating * 100).toFixed(0)}%</td>
-      <td><input class="ci ci-calc" readonly value="${brl(premios[i])}"></td>
-      <td class="td-status no-print"><span class="dot ${ating >= 1 ? 'dot-ok' : ating >= it.minimo_pct / 100 ? 'dot-warn' : 'dot-fail'}"></span></td>`;
+      <td><input class="ci ci-val" type="text" inputmode="decimal" autocomplete="off" value="${it.realizado}" oninput="alterarRealizado('${bloco}',${i},this.value)"></td>
+      <td id="ating-${bloco}-${i}">0%</td>
+      <td><input class="ci ci-calc" id="calc-${bloco}-${i}" readonly value="R$ 0,00"></td>
+      <td class="td-status no-print"><span class="dot" id="dot-${bloco}-${i}"></span></td>`;
     tbody.appendChild(tr);
+  });
+}
+
+// Só atualiza os valores calculados (não recria os campos de digitação).
+function renderBloco(bloco, tetoBloco) {
+  const { total, gatilho, premios } = calcularBloco(itens[bloco], tetoBloco);
+
+  itens[bloco].forEach((it, i) => {
+    const ating = atingimento(it);
+    document.getElementById('ating-' + bloco + '-' + i).textContent = (ating * 100).toFixed(0) + '%';
+    document.getElementById('calc-' + bloco + '-' + i).value = brl(premios[i]);
+    const dot = document.getElementById('dot-' + bloco + '-' + i);
+    dot.className = 'dot ' + (ating >= 1 ? 'dot-ok' : ating >= it.minimo_pct / 100 ? 'dot-warn' : 'dot-fail');
   });
 
   document.getElementById('total-' + bloco).textContent = brl(total);
@@ -66,7 +84,7 @@ function renderBloco(bloco, tetoBloco) {
 }
 
 function alterarRealizado(bloco, i, valor) {
-  itens[bloco][i].realizado = valor;
+  itens[bloco][i].realizado = parseNumero(valor);
   atualizar();
 }
 
@@ -131,4 +149,5 @@ function salvar() {
     .catch(err => { msg.textContent = 'Erro ao salvar: ' + err.message; });
 }
 
+['A', 'B', 'C'].forEach(montarBloco);
 atualizar();
