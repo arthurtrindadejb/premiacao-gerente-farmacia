@@ -34,7 +34,8 @@ function calcularBloco(lista, tetoBloco) {
   const premios = lista.map(it => {
     if (gatilho) return 0;
     const mult = multiplicador(atingimento(it), it.minimo_pct, it.teto_pct, it.mult_min, it.mult_max);
-    const premio = (tetoBloco * it.peso / 100) * mult;
+    const multMax = it.mult_max || 1.0;
+    const premio = (tetoBloco * it.peso / 100) * (mult / multMax);
     total += premio;
     return premio;
   });
@@ -121,7 +122,7 @@ function atualizar() {
   document.getElementById('p-b').textContent = brl(totalB);
   document.getElementById('p-c').textContent = brl(totalC);
   document.getElementById('r-prog').style.width = pct.toFixed(1) + '%';
-  document.getElementById('r-pct').textContent = pct.toFixed(0) + '% do teto';
+  document.getElementById('r-pct').textContent = pct.toFixed(0) + '% do Prêmio Total';
 
   let html = '';
   if (desvio) html += '<div class="alert-box a-danger">⛔ Desvio de conduta — premiação zerada</div>';

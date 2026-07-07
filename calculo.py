@@ -33,7 +33,13 @@ def multiplicador(ating, minimo_pct, teto_pct, mult_min, mult_max):
 
 
 def calcular_item(item, teto_bloco, gatilho_disparado):
-    """item: dict com meta, peso, realizado, inverso, minimo_pct, teto_pct, mult_min, mult_max."""
+    """item: dict com meta, peso, realizado, inverso, minimo_pct, teto_pct, mult_min, mult_max.
+
+    O prêmio máximo (item["mult_max"]) corresponde ao valor cheio da fatia do
+    indicador — ou seja, o "Prêmio Total" do gerente só é pago por inteiro
+    quando a super meta é atingida. Bater exatamente a meta (mult=1.0) paga
+    proporcionalmente menos que isso.
+    """
     ating = atingimento(item["realizado"], item["meta"], item["inverso"])
     if gatilho_disparado:
         premio = 0.0
@@ -41,8 +47,9 @@ def calcular_item(item, teto_bloco, gatilho_disparado):
         mult = multiplicador(
             ating, item["minimo_pct"], item["teto_pct"], item["mult_min"], item["mult_max"]
         )
+        mult_max = item["mult_max"] if item["mult_max"] else 1.0
         teto_item = teto_bloco * item["peso"] / 100
-        premio = teto_item * mult
+        premio = teto_item * (mult / mult_max)
     return ating, premio
 
 
