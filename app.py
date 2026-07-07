@@ -1,13 +1,16 @@
+import io
 import json
 import os
 from datetime import date
 
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_wtf import CSRFProtect
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
 from werkzeug.security import generate_password_hash
 
 from auth import admin_required, login_required, verificar_login
-from calculo import calcular_mes
+from calculo import atingimento, calcular_mes
 from db import db
 
 app = Flask(__name__)
@@ -414,6 +417,64 @@ def indicadores_json(gerente_id):
 
 # ───────────────────────── calculadora do mês ─────────────────────────
 
+def carregar_calculo_mes(conn, gerente, gerente_id, mes):
+    """Carrega os dados do mês (salvo) ou monta um rascunho a partir do
+    template vivo de indicadores (ainda não salvo). Usado tanto pela tela
+    da calculadora quanto pela exportação em Excel."""
+    calculo = conn.execute(
+        "SELECT * FROM calculos WHERE gerente_id=%s AND mes=%s", (gerente_id, mes)
+    ).fetchone()
+
+    if calculo:
+        gerente_calc = dict(gerente)
+        gerente_calc.update(
+            {
+                "teto": float(calculo["teto"]),
+                "peso_a": float(calculo["peso_a"]),
+                "peso_b": float(calculo["peso_b"]),
+                "peso_c": float(calculo["peso_c"]),
+            }
+        )
+        itens_rows = conn.execute(
+            "SELECT * FROM calculo_itens WHERE calculo_id=%s ORDER BY bloco, ordem, id",
+            (calculo["id"],),
+        ).fetchall()
+        itens_por_bloco = {"A": [], "B": [], "C": []}
+        for row in itens_rows:
+            item = _linha_indicador(row)
+            item["realizado"] = float(row["realizado"])
+            itens_por_bloco[row["bloco"]].append(item)
+        ajustes_rows = conn.execute(
+            "SELECT nome, valor FROM calculo_ajustes WHERE calculo_id=%s ORDER BY ordem, id",
+            (calculo["id"],),
+        ).fetchall()
+        ajustes = [{"nome": r["nome"], "valor": float(r["valor"])} for r in ajustes_rows]
+        ja_salvo = True
+        atualizado_em = calculo["atualizado_em"].strftime("%d/%m/%Y %H:%M")
+    else:
+        gerente_calc = dict(gerente)
+        linhas = conn.execute(
+            "SELECT * FROM indicadores WHERE gerente_id=%s ORDER BY bloco, ordem, id",
+            (gerente_id,),
+        ).fetchall()
+        itens_por_bloco = {"A": [], "B": [], "C": []}
+        for linha in linhas:
+            item = _linha_indicador(linha)
+            item["realizado"] = 0.0
+            itens_por_bloco[linha["bloco"]].append(item)
+        ajustes = []
+        ja_salvo = False
+        atualizado_em = None
+
+    return {
+        "gerente_calc": gerente_calc,
+        "itens_por_bloco": itens_por_bloco,
+        "ajustes": ajustes,
+        "ja_salvo": ja_salvo,
+        "atualizado_em": atualizado_em,
+    }
+
+
 @app.route("/gerentes/<int:gerente_id>/mes")
 @login_required
 def calculadora_mes_atual(gerente_id):
@@ -426,60 +487,18 @@ def calculadora(gerente_id, mes):
     conn = db()
     try:
         gerente = carregar_gerente(conn, gerente_id)
-        calculo = conn.execute(
-            "SELECT * FROM calculos WHERE gerente_id=%s AND mes=%s", (gerente_id, mes)
-        ).fetchone()
-
-        if calculo:
-            gerente_calc = dict(gerente)
-            gerente_calc.update(
-                {
-                    "teto": float(calculo["teto"]),
-                    "peso_a": float(calculo["peso_a"]),
-                    "peso_b": float(calculo["peso_b"]),
-                    "peso_c": float(calculo["peso_c"]),
-                }
-            )
-            itens_rows = conn.execute(
-                "SELECT * FROM calculo_itens WHERE calculo_id=%s ORDER BY bloco, ordem, id",
-                (calculo["id"],),
-            ).fetchall()
-            itens_por_bloco = {"A": [], "B": [], "C": []}
-            for row in itens_rows:
-                item = _linha_indicador(row)
-                item["realizado"] = float(row["realizado"])
-                itens_por_bloco[row["bloco"]].append(item)
-            ajustes_rows = conn.execute(
-                "SELECT nome, valor FROM calculo_ajustes WHERE calculo_id=%s ORDER BY ordem, id",
-                (calculo["id"],),
-            ).fetchall()
-            ajustes = [{"nome": r["nome"], "valor": float(r["valor"])} for r in ajustes_rows]
-            ja_salvo = True
-            atualizado_em = calculo["atualizado_em"].strftime("%d/%m/%Y %H:%M")
-        else:
-            gerente_calc = dict(gerente)
-            linhas = conn.execute(
-                "SELECT * FROM indicadores WHERE gerente_id=%s ORDER BY bloco, ordem, id",
-                (gerente_id,),
-            ).fetchall()
-            itens_por_bloco = {"A": [], "B": [], "C": []}
-            for linha in linhas:
-                item = _linha_indicador(linha)
-                item["realizado"] = 0.0
-                itens_por_bloco[linha["bloco"]].append(item)
-            ajustes = []
-            ja_salvo = False
-            atualizado_em = None
+        dados = carregar_calculo_mes(conn, gerente, gerente_id, mes)
     finally:
         conn.close()
 
+    gerente_calc = dados["gerente_calc"]
     return render_template(
         "calculadora.html",
         gerente=gerente_calc,
         mes=mes,
         mes_label=mes_label(mes),
-        ja_salvo=ja_salvo,
-        atualizado_em=atualizado_em,
+        ja_salvo=dados["ja_salvo"],
+        atualizado_em=dados["atualizado_em"],
         gerente_json=json.dumps(
             {
                 "teto": gerente_calc["teto"],
@@ -488,8 +507,105 @@ def calculadora(gerente_id, mes):
                 "peso_c": gerente_calc["peso_c"],
             }
         ),
-        itens_json=json.dumps(itens_por_bloco),
-        ajustes_json=json.dumps(ajustes),
+        itens_json=json.dumps(dados["itens_por_bloco"]),
+        ajustes_json=json.dumps(dados["ajustes"]),
+    )
+
+
+NOME_BLOCO = {"A": "Bloco A — Financeiro", "B": "Bloco B — Processos", "C": "Bloco C — Pessoas"}
+
+
+@app.route("/gerentes/<int:gerente_id>/mes/<mes>/exportar.xlsx")
+@login_required
+def calculadora_exportar(gerente_id, mes):
+    conn = db()
+    try:
+        gerente = carregar_gerente(conn, gerente_id)
+        dados = carregar_calculo_mes(conn, gerente, gerente_id, mes)
+    finally:
+        conn.close()
+
+    gerente_calc = dados["gerente_calc"]
+    resultado = calcular_mes(gerente_calc, dados["itens_por_bloco"], dados["ajustes"])
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Premiação"
+
+    negrito = Font(bold=True)
+    negrito_grande = Font(bold=True, size=13)
+    fmt_moeda = "R$ #,##0.00"
+    fmt_pct = "0%"
+
+    ws.append([f"{gerente_calc['nome']} — {gerente_calc['loja']}"])
+    ws["A1"].font = negrito_grande
+    ws.append([mes_label(mes)])
+    ws.append([])
+
+    linha = 4
+    for bloco in ("A", "B", "C"):
+        ws.append([NOME_BLOCO[bloco]])
+        ws.cell(row=linha, column=1).font = negrito
+        linha += 1
+        ws.append(["Indicador", "Meta", "Peso %", "Realizado", "% Atingido", "Prêmio calculado"])
+        for cel in ws[linha]:
+            cel.font = negrito
+        linha += 1
+
+        itens = dados["itens_por_bloco"][bloco]
+        premios = resultado["premios"][bloco]
+        for item, premio in zip(itens, premios):
+            ating = atingimento(item["realizado"], item["meta"], item["inverso"])
+            ws.append([item["nome"], item["meta"], item["peso"] / 100, item["realizado"], ating, premio])
+            ws.cell(row=linha, column=3).number_format = fmt_pct
+            ws.cell(row=linha, column=5).number_format = fmt_pct
+            ws.cell(row=linha, column=6).number_format = fmt_moeda
+            linha += 1
+
+        ws.append([f"Total {NOME_BLOCO[bloco]}", "", "", "", "", resultado[f"total_{bloco.lower()}"]])
+        for cel in ws[linha]:
+            cel.font = negrito
+        ws.cell(row=linha, column=6).number_format = fmt_moeda
+        linha += 1
+        ws.append([])
+        linha += 1
+
+    ws.append(["Ajustes (prêmios extras / penalidades)"])
+    ws.cell(row=linha, column=1).font = negrito
+    linha += 1
+    ws.append(["Descrição", "Valor"])
+    for cel in ws[linha]:
+        cel.font = negrito
+    linha += 1
+    for ajuste in dados["ajustes"]:
+        ws.append([ajuste["nome"], ajuste["valor"]])
+        ws.cell(row=linha, column=2).number_format = fmt_moeda
+        linha += 1
+    ws.append(["Soma dos ajustes", resultado["soma_ajustes"]])
+    for cel in ws[linha]:
+        cel.font = negrito
+    ws.cell(row=linha, column=2).number_format = fmt_moeda
+    linha += 2
+
+    ws.append(["Total a pagar", resultado["total"]])
+    for cel in ws[linha]:
+        cel.font = negrito_grande
+    ws.cell(row=linha, column=2).number_format = fmt_moeda
+
+    ws.column_dimensions["A"].width = 32
+    for col in "BCDEF":
+        ws.column_dimensions[col].width = 16
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    nome_arquivo = f"premiacao_{gerente_calc['nome']}_{mes}.xlsx".replace(" ", "_")
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=nome_arquivo,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
