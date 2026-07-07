@@ -64,15 +64,24 @@
 </div>
 {% endfor %}
 
-<div class="gate-panel no-print">
-  <div class="gate-header">⚠ Cortes disciplinares — ative se aplicável no mês</div>
-  <div class="gate-row">
-    <div class="gate-desc">Advertência formal registrada <strong style="color:#c2410c;">(−30% sobre o total)</strong></div>
-    <label class="sw-wrap"><input type="checkbox" id="g-adv" onchange="atualizar()"><span class="sw"></span></label>
+<div class="section-title">Ajustes — prêmios extras e penalidades</div>
+<div class="bloco-card">
+  <div class="bloco-header">
+    <div class="bloco-header-left">
+      <div class="title">Ajustes sobre o total do mês</div>
+      <div class="sub">Valor positivo soma, negativo desconta — como um fluxo de caixa</div>
+    </div>
   </div>
-  <div class="gate-row">
-    <div class="gate-desc">Desvio de conduta comprovado <strong style="color:#c2410c;">(premiação zerada)</strong></div>
-    <label class="sw-wrap"><input type="checkbox" id="g-dev" onchange="atualizar()"><span class="sw"></span></label>
+  <div class="kpi-wrap">
+    <table class="kt">
+      <thead><tr><th>Descrição</th><th>Valor (R$)</th><th class="td-del no-print"></th></tr></thead>
+      <tbody id="tbody-ajustes"></tbody>
+    </table>
+  </div>
+  <button class="btn-add no-print" type="button" onclick="addAjuste()">+ Adicionar ajuste</button>
+  <div class="bloco-footer">
+    <span>Soma dos ajustes</span>
+    <span id="ajustes-total">R$ 0,00</span>
   </div>
 </div>
 
@@ -106,8 +115,7 @@ const CSRF_TOKEN = "{{ csrf_token() }}";
 const SALVAR_URL = "{{ url_for('calculadora_salvar', gerente_id=gerente.id, mes=mes) }}";
 const gerenteInfo = {{ gerente_json|safe }};
 const itens = {{ itens_json|safe }};
-let advertencia = {{ 'true' if advertencia else 'false' }};
-let desvio = {{ 'true' if desvio else 'false' }};
+let ajustes = {{ ajustes_json|safe }};
 </script>
 <script src="{{ url_for('static', filename='calculadora.js') }}"></script>
 {% endblock %}

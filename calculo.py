@@ -71,12 +71,15 @@ def calcular_bloco(itens, teto_bloco):
     return total, gatilho_disparado, premios
 
 
-def calcular_mes(gerente, itens_por_bloco, advertencia, desvio):
+def calcular_mes(gerente, itens_por_bloco, ajustes):
     """gerente: dict com teto, peso_a, peso_b, peso_c.
     itens_por_bloco: {'A': [...], 'B': [...], 'C': [...]}.
+    ajustes: lista de {'nome':str, 'valor':float} — prêmios extras (positivo)
+    ou penalidades (negativo) aplicados sobre o total do mês, como um fluxo
+    de caixa. O total nunca fica negativo (trava em zero).
 
     Retorna dict com totais por bloco, gatilhos disparados, prêmio calculado
-    por item (na mesma ordem de entrada) e o total do mês.
+    por item (na mesma ordem de entrada), a soma dos ajustes e o total do mês.
     """
     teto_a = gerente["teto"] * gerente["peso_a"] / 100
     teto_b = gerente["teto"] * gerente["peso_b"] / 100
@@ -86,14 +89,8 @@ def calcular_mes(gerente, itens_por_bloco, advertencia, desvio):
     total_b, gatilho_b, premios_b = calcular_bloco(itens_por_bloco.get("B", []), teto_b)
     total_c, gatilho_c, premios_c = calcular_bloco(itens_por_bloco.get("C", []), teto_c)
 
-    if desvio:
-        total_a = total_b = total_c = 0.0
-    elif advertencia:
-        total_a *= 0.7
-        total_b *= 0.7
-        total_c *= 0.7
-
-    total = total_a + total_b + total_c
+    soma_ajustes = sum(float(a.get("valor", 0) or 0) for a in ajustes)
+    total = max(0.0, total_a + total_b + total_c + soma_ajustes)
 
     return {
         "teto_a": teto_a,
@@ -102,6 +99,7 @@ def calcular_mes(gerente, itens_por_bloco, advertencia, desvio):
         "total_a": total_a,
         "total_b": total_b,
         "total_c": total_c,
+        "soma_ajustes": soma_ajustes,
         "total": total,
         "gatilho_a": gatilho_a,
         "gatilho_b": gatilho_b,

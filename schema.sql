@@ -84,3 +84,14 @@ CREATE TABLE IF NOT EXISTS calculo_itens (
     premio_calculado    NUMERIC(12,2) NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_calculo_itens_calculo ON calculo_itens(calculo_id);
+
+-- ajustes livres do mês (prêmios extras ou penalidades) — valor positivo soma,
+-- negativo desconta do total; substitui os antigos campos advertencia/desvio
+CREATE TABLE IF NOT EXISTS calculo_ajustes (
+    id              SERIAL PRIMARY KEY,
+    calculo_id      INTEGER NOT NULL REFERENCES calculos(id) ON DELETE CASCADE,
+    ordem           INTEGER NOT NULL DEFAULT 0,
+    nome            TEXT NOT NULL,
+    valor           NUMERIC(12,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_calculo_ajustes_calculo ON calculo_ajustes(calculo_id);

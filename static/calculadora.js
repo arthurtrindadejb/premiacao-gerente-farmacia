@@ -5,6 +5,12 @@ function brl(v) {
   return 'R$ ' + Math.max(0, v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Como os ajustes podem ser negativos (penalidade), essa versão não trava em zero.
+function brlSinal(v) {
+  const sinal = v < 0 ? '-' : '';
+  return sinal + 'R$ ' + Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function atingimento(item) {
   if (item.meta <= 0) return 0;
   if (!item.inverso) return item.realizado / item.meta;
@@ -89,10 +95,42 @@ function alterarRealizado(bloco, i, valor) {
   atualizar();
 }
 
-function atualizar() {
-  advertencia = document.getElementById('g-adv').checked;
-  desvio = document.getElementById('g-dev').checked;
+// Monta as linhas de ajustes uma única vez (chamado no início e após add/remover).
+function montarAjustes() {
+  const tbody = document.getElementById('tbody-ajustes');
+  tbody.innerHTML = '';
+  ajustes.forEach((a, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input class="ci ci-name" value="${String(a.nome).replace(/"/g, '&quot;')}" oninput="alterarAjusteNome(${i},this.value)" placeholder="Ex: bônus campanha, desconto uniforme..."></td>
+      <td><input class="ci ci-val" type="text" inputmode="decimal" autocomplete="off" value="${a.valor}" oninput="alterarAjusteValor(${i},this.value)"></td>
+      <td class="td-del no-print"><button type="button" class="btn-del" onclick="delAjuste(${i})" title="Remover">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
 
+function addAjuste() {
+  ajustes.push({ nome: '', valor: 0 });
+  montarAjustes();
+  atualizar();
+}
+
+function delAjuste(i) {
+  ajustes.splice(i, 1);
+  montarAjustes();
+  atualizar();
+}
+
+function alterarAjusteNome(i, valor) {
+  ajustes[i].nome = valor;
+}
+
+function alterarAjusteValor(i, valor) {
+  ajustes[i].valor = parseNumero(valor);
+  atualizar();
+}
+
+function atualizar() {
   const teto = gerenteInfo.teto;
   const tetoA = teto * gerenteInfo.peso_a / 100;
   const tetoB = teto * gerenteInfo.peso_b / 100;
@@ -102,15 +140,15 @@ function atualizar() {
   document.getElementById('h-C').textContent = brl(tetoC);
   document.getElementById('r-teto-lbl').textContent = brl(teto);
 
-  const { total: rawA, gatilho: gatilhoA } = renderBloco('A', tetoA);
-  const { total: rawB, gatilho: gatilhoB } = renderBloco('B', tetoB);
-  const { total: rawC, gatilho: gatilhoC } = renderBloco('C', tetoC);
+  const { total: totalA, gatilho: gatilhoA } = renderBloco('A', tetoA);
+  const { total: totalB, gatilho: gatilhoB } = renderBloco('B', tetoB);
+  const { total: totalC, gatilho: gatilhoC } = renderBloco('C', tetoC);
 
-  let totalA = rawA, totalB = rawB, totalC = rawC;
-  if (desvio) { totalA = totalB = totalC = 0; }
-  else if (advertencia) { totalA *= 0.7; totalB *= 0.7; totalC *= 0.7; }
+  const somaAjustes = ajustes.reduce((s, a) => s + (parseFloat(a.valor) || 0), 0);
+  document.getElementById('ajustes-total').textContent = brlSinal(somaAjustes);
 
-  const total = totalA + totalB + totalC;
+  const bruto = totalA + totalB + totalC + somaAjustes;
+  const total = Math.max(0, bruto);
   const pct = teto > 0 ? Math.min(100, total / teto * 100) : 0;
 
   document.getElementById('r-total').textContent = brl(total);
@@ -125,12 +163,11 @@ function atualizar() {
   document.getElementById('r-pct').textContent = pct.toFixed(0) + '% do Prêmio Total';
 
   let html = '';
-  if (desvio) html += '<div class="alert-box a-danger">⛔ Desvio de conduta — premiação zerada</div>';
-  else if (advertencia) html += '<div class="alert-box a-warn">⚠ Advertência formal — desconto de 30%</div>';
   if (gatilhoA) html += '<div class="alert-box a-danger">⛔ Gatilho do Bloco A disparado — bloco zerado</div>';
   if (gatilhoB) html += '<div class="alert-box a-danger">⛔ Gatilho do Bloco B disparado — bloco zerado</div>';
   if (gatilhoC) html += '<div class="alert-box a-danger">⛔ Gatilho do Bloco C disparado — bloco zerado</div>';
-  if (!desvio && !gatilhoA && !gatilhoB && !gatilhoC && total >= teto * 0.99) html += '<div class="alert-box a-ok">✅ Premiação máxima — excelência total</div>';
+  if (bruto < 0) html += '<div class="alert-box a-warn">⚠ Os ajustes descontam mais que o prêmio ganho — total travado em R$ 0,00</div>';
+  if (!gatilhoA && !gatilhoB && !gatilhoC && bruto >= 0 && total >= teto * 0.99) html += '<div class="alert-box a-ok">✅ Premiação máxima — excelência total</div>';
   document.getElementById('r-alerts').innerHTML = html;
 }
 
@@ -140,7 +177,7 @@ function salvar() {
   fetch(SALVAR_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
-    body: JSON.stringify({ itens, advertencia, desvio }),
+    body: JSON.stringify({ itens, ajustes }),
   })
     .then(r => r.json().then(data => ({ status: r.status, data })))
     .then(({ status, data }) => {
@@ -151,4 +188,5 @@ function salvar() {
 }
 
 ['A', 'B', 'C'].forEach(montarBloco);
+montarAjustes();
 atualizar();

@@ -449,10 +449,13 @@ def calculadora(gerente_id, mes):
                 item = _linha_indicador(row)
                 item["realizado"] = float(row["realizado"])
                 itens_por_bloco[row["bloco"]].append(item)
+            ajustes_rows = conn.execute(
+                "SELECT nome, valor FROM calculo_ajustes WHERE calculo_id=%s ORDER BY ordem, id",
+                (calculo["id"],),
+            ).fetchall()
+            ajustes = [{"nome": r["nome"], "valor": float(r["valor"])} for r in ajustes_rows]
             ja_salvo = True
             atualizado_em = calculo["atualizado_em"].strftime("%d/%m/%Y %H:%M")
-            advertencia = calculo["advertencia"]
-            desvio = calculo["desvio"]
         else:
             gerente_calc = dict(gerente)
             linhas = conn.execute(
@@ -464,10 +467,9 @@ def calculadora(gerente_id, mes):
                 item = _linha_indicador(linha)
                 item["realizado"] = 0.0
                 itens_por_bloco[linha["bloco"]].append(item)
+            ajustes = []
             ja_salvo = False
             atualizado_em = None
-            advertencia = False
-            desvio = False
     finally:
         conn.close()
 
@@ -487,8 +489,7 @@ def calculadora(gerente_id, mes):
             }
         ),
         itens_json=json.dumps(itens_por_bloco),
-        advertencia=advertencia,
-        desvio=desvio,
+        ajustes_json=json.dumps(ajustes),
     )
 
 
@@ -497,8 +498,7 @@ def calculadora(gerente_id, mes):
 def calculadora_salvar(gerente_id, mes):
     payload = request.get_json(silent=True) or {}
     itens_enviados = payload.get("itens", {})
-    advertencia = bool(payload.get("advertencia", False))
-    desvio = bool(payload.get("desvio", False))
+    ajustes_enviados = payload.get("ajustes", [])
 
     conn = db()
     try:
@@ -523,7 +523,15 @@ def calculadora_salvar(gerente_id, mes):
                     }
                 )
 
-        resultado = calcular_mes(gerente, itens_por_bloco, advertencia, desvio)
+        ajustes = []
+        for ordem, ajuste in enumerate(ajustes_enviados):
+            nome = str(ajuste.get("nome", "")).strip()
+            valor = float(ajuste.get("valor", 0) or 0)
+            if not nome and valor == 0:
+                continue
+            ajustes.append({"ordem": ordem, "nome": nome or "Ajuste", "valor": valor})
+
+        resultado = calcular_mes(gerente, itens_por_bloco, ajustes)
 
         calculo = conn.execute(
             "SELECT id FROM calculos WHERE gerente_id=%s AND mes=%s", (gerente_id, mes)
@@ -533,26 +541,24 @@ def calculadora_salvar(gerente_id, mes):
             calculo_id = calculo["id"]
             conn.execute(
                 """UPDATE calculos SET teto=%s, peso_a=%s, peso_b=%s, peso_c=%s,
-                       advertencia=%s, desvio=%s, total_a=%s, total_b=%s, total_c=%s,
-                       total=%s, atualizado_em=now()
+                       total_a=%s, total_b=%s, total_c=%s, total=%s, atualizado_em=now()
                    WHERE id=%s""",
                 (
                     gerente["teto"], gerente["peso_a"], gerente["peso_b"], gerente["peso_c"],
-                    advertencia, desvio,
                     resultado["total_a"], resultado["total_b"], resultado["total_c"],
                     resultado["total"], calculo_id,
                 ),
             )
             conn.execute("DELETE FROM calculo_itens WHERE calculo_id=%s", (calculo_id,))
+            conn.execute("DELETE FROM calculo_ajustes WHERE calculo_id=%s", (calculo_id,))
         else:
             row = conn.execute(
                 """INSERT INTO calculos
-                       (gerente_id, mes, teto, peso_a, peso_b, peso_c, advertencia, desvio,
+                       (gerente_id, mes, teto, peso_a, peso_b, peso_c,
                         total_a, total_b, total_c, total)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                 (
                     gerente_id, mes, gerente["teto"], gerente["peso_a"], gerente["peso_b"], gerente["peso_c"],
-                    advertencia, desvio,
                     resultado["total_a"], resultado["total_b"], resultado["total_c"], resultado["total"],
                 ),
             ).fetchone()
@@ -572,6 +578,12 @@ def calculadora_salvar(gerente_id, mes):
                         item["mult_min"], item["mult_max"], item["realizado"], premio,
                     ),
                 )
+
+        for ajuste in ajustes:
+            conn.execute(
+                "INSERT INTO calculo_ajustes (calculo_id, ordem, nome, valor) VALUES (%s,%s,%s,%s)",
+                (calculo_id, ajuste["ordem"], ajuste["nome"], ajuste["valor"]),
+            )
 
         conn.commit()
         return jsonify({"ok": True, "total": resultado["total"]})
