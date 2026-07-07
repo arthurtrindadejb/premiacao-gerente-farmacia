@@ -32,6 +32,7 @@
         <td><span class="badge {{ 'badge-ativo' if c.ativo else 'badge-inativo' }}">{{ 'Ativo' if c.ativo else 'Inativo' }}</span></td>
         <td class="acoes">
           <a class="btn btn-secondary btn-sm" href="{{ url_for('admin_cliente_editar', cliente_id=c.id) }}">Editar</a>
+          <a class="btn btn-secondary btn-sm" href="{{ url_for('admin_gerentes', cliente_id=c.id) }}">Gerentes</a>
           <form style="display:inline;" method="post" action="{{ url_for('admin_cliente_desativar', cliente_id=c.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm {{ 'btn-danger' if c.ativo else 'btn-secondary' }}" type="submit">{{ 'Desativar' if c.ativo else 'Reativar' }}</button>

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block titulo %}Gerentes — {{ cliente.nome }} (admin){% endblock %}
+{% block header_titulo %}{{ cliente.nome }}{% endblock %}
+{% block header_sub %}Gerentes cadastrados · visão do administrador{% endblock %}
+{% block conteudo %}
+<div class="card">
+  <h2>Copiar indicadores de outro cliente</h2>
+  <p style="font-size:12px;color:var(--gray-600);margin-bottom:0.75rem;">
+    Escolha um cliente e um gerente de origem para copiar o padrão de indicadores
+    para o gerente da linha (substitui os indicadores atuais dele).
+  </p>
+  <table class="lista">
+    <thead><tr><th>Gerente</th><th>Loja</th><th>Indicadores</th><th class="acoes">Copiar de</th></tr></thead>
+    <tbody>
+    {% for g in gerentes %}
+      <tr>
+        <td>{{ g.nome }}</td>
+        <td>{{ g.loja }}</td>
+        <td>{{ g.total_indicadores }}</td>
+        <td class="acoes">
+          <select class="sel-cliente-origem" data-destino="{{ g.id }}" style="width:150px;display:inline-block;">
+            <option value="">Cliente de origem...</option>
+            {% for c in todos_clientes %}
+              {% if c.id != cliente.id %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endif %}
+            {% endfor %}
+          </select>
+          <select class="sel-gerente-origem" data-destino="{{ g.id }}" style="width:150px;display:inline-block;" disabled>
+            <option value="">selecione o cliente</option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="copiarPara({{ g.id }})">Copiar</button>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" style="color:var(--gray-600);">Nenhum gerente cadastrado para este cliente.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<a class="btn btn-secondary" href="{{ url_for('admin_clientes') }}">Voltar</a>
+
+<script>
+const CSRF_TOKEN = "{{ csrf_token() }}";
+
+document.querySelectorAll('.sel-cliente-origem').forEach(function (sel) {
+  sel.addEventListener('change', function () {
+    const destino = this.dataset.destino;
+    const gerenteSel = document.querySelector('.sel-gerente-origem[data-destino="' + destino + '"]');
+    if (!this.value) {
+      gerenteSel.innerHTML = '<option value="">selecione o cliente</option>';
+      gerenteSel.disabled = true;
+      return;
+    }
+    gerenteSel.innerHTML = '<option value="">carregando...</option>';
+    gerenteSel.disabled = true;
+    fetch('/admin/clientes/' + this.value + '/gerentes.json')
+      .then(r => r.json())
+      .then(lista => {
+        if (!lista.length) {
+          gerenteSel.innerHTML = '<option value="">nenhum gerente com indicadores</option>';
+          return;
+        }
+        gerenteSel.innerHTML = '<option value="">Selecione o gerente...</option>' +
+          lista.map(g => `<option value="${g.id}">${g.nome}${g.loja ? ' — ' + g.loja : ''}</option>`).join('');
+        gerenteSel.disabled = false;
+      });
+  });
+});
+
+function copiarPara(destinoId) {
+  const gerenteSel = document.querySelector('.sel-gerente-origem[data-destino="' + destinoId + '"]');
+  const origemId = gerenteSel.value;
+  if (!origemId) { alert('Selecione o cliente e o gerente de origem primeiro.'); return; }
+  if (!confirm('Isso substitui os indicadores atuais deste gerente pelos do gerente selecionado. Continuar?')) return;
+  fetch('/admin/gerentes/' + destinoId + '/copiar-de/' + origemId, {
+    method: 'POST',
+    headers: { 'X-CSRFToken': CSRF_TOKEN },
+  })
+    .then(r => r.json().then(data => ({ status: r.status, data })))
+    .then(({ status, data }) => {
+      if (status !== 200) throw new Error(data.erro || 'Falha ao copiar');
+      window.location.reload();
+    })
+    .catch(err => alert('Não foi possível copiar: ' + err.message));
+}
+</script>
+{% endblock %}

@@ -155,6 +155,80 @@ def admin_cliente_desativar(cliente_id):
     return redirect(url_for("admin_clientes"))
 
 
+@app.route("/admin/clientes/<int:cliente_id>/gerentes")
+@admin_required
+def admin_gerentes(cliente_id):
+    conn = db()
+    try:
+        cliente = conn.execute("SELECT * FROM clientes WHERE id=%s", (cliente_id,)).fetchone()
+        if not cliente:
+            abort(404)
+        gerentes_rows = conn.execute(
+            """SELECT g.*, (SELECT COUNT(*) FROM indicadores i WHERE i.gerente_id = g.id) AS total_indicadores
+               FROM gerentes g WHERE g.cliente_id=%s ORDER BY g.nome""",
+            (cliente_id,),
+        ).fetchall()
+        todos_clientes = conn.execute(
+            "SELECT id, nome FROM clientes WHERE ativo=TRUE ORDER BY nome"
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template(
+        "admin_gerentes.html", cliente=cliente, gerentes=gerentes_rows, todos_clientes=todos_clientes
+    )
+
+
+@app.route("/admin/clientes/<int:cliente_id>/gerentes.json")
+@admin_required
+def admin_gerentes_json(cliente_id):
+    conn = db()
+    try:
+        linhas = conn.execute(
+            """SELECT g.id, g.nome, g.loja FROM gerentes g
+               WHERE g.cliente_id=%s
+                 AND EXISTS (SELECT 1 FROM indicadores i WHERE i.gerente_id = g.id)
+               ORDER BY g.nome""",
+            (cliente_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return jsonify([dict(r) for r in linhas])
+
+
+@app.route("/admin/gerentes/<int:destino_id>/copiar-de/<int:origem_id>", methods=["POST"])
+@admin_required
+def admin_copiar_indicadores(destino_id, origem_id):
+    conn = db()
+    try:
+        destino = conn.execute("SELECT id FROM gerentes WHERE id=%s", (destino_id,)).fetchone()
+        origem = conn.execute("SELECT id FROM gerentes WHERE id=%s", (origem_id,)).fetchone()
+        if not destino or not origem:
+            abort(404)
+        origem_itens = conn.execute(
+            "SELECT * FROM indicadores WHERE gerente_id=%s ORDER BY bloco, ordem, id", (origem_id,)
+        ).fetchall()
+        conn.execute("DELETE FROM indicadores WHERE gerente_id=%s", (destino_id,))
+        for linha in origem_itens:
+            conn.execute(
+                """INSERT INTO indicadores
+                       (gerente_id, bloco, ordem, nome, meta, peso, inverso, eh_gatilho,
+                        minimo_pct, teto_pct, mult_min, mult_max)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    destino_id, linha["bloco"], linha["ordem"], linha["nome"], linha["meta"], linha["peso"],
+                    linha["inverso"], linha["eh_gatilho"], linha["minimo_pct"], linha["teto_pct"],
+                    linha["mult_min"], linha["mult_max"],
+                ),
+            )
+        conn.commit()
+        return jsonify({"ok": True})
+    except Exception as exc:  # noqa: BLE001
+        conn.rollback()
+        return jsonify({"erro": str(exc)}), 400
+    finally:
+        conn.close()
+
+
 # ───────────────────────── gerentes (por cliente) ─────────────────────────
 
 @app.route("/gerentes")
