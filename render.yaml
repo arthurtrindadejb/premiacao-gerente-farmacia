@@ -1,6 +1,25 @@
+databases:
+  - name: premiacao-gerente-db
+    databaseName: premiacao_gerente
+    plan: basic-256mb
+
 services:
   - type: web
     name: premiacao-gerente-farmacia
-    env: static
-    staticPublishPath: ./public
-    buildCommand: ""
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: premiacao-gerente-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.12.3

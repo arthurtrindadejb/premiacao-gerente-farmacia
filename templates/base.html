@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block titulo %}Premiação Variável{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='estilos.css') }}">
+{% block head_extra %}{% endblock %}
+</head>
+<body>
+
+<div class="page-header no-print">
+  <div>
+    <h1>{% block header_titulo %}Sistema de Premiação Variável{% endblock %}</h1>
+    <p>{% block header_sub %}Mentory Farma · Calculadora e Simulador de Premiação{% endblock %}</p>
+  </div>
+  <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+    {% block header_extra %}{% endblock %}
+    {% if session.get('is_admin') or session.get('cliente_id') %}
+      <a class="sair" href="{{ url_for('logout') }}">Sair</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="page-body {% block body_classe %}{% endblock %}">
+  {% with mensagens = get_flashed_messages(with_categories=true) %}
+    {% if mensagens %}
+      {% for categoria, msg in mensagens %}
+        <div class="flash {% if categoria == 'erro' %}erro{% endif %}">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  {% block conteudo %}{% endblock %}
+</div>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

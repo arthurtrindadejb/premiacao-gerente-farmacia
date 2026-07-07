@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block titulo %}{% if gerente %}Editar gerente{% else %}Novo gerente{% endif %}{% endblock %}
+{% block header_titulo %}{{ session.get('cliente_nome') }}{% endblock %}
+{% block header_sub %}{% if gerente %}Editar gerente{% else %}Novo gerente{% endif %}{% endblock %}
+{% block conteudo %}
+<div class="card">
+  <h2>{% if gerente %}Editar {{ gerente.nome }}{% else %}Novo gerente{% endif %}</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field-row">
+      <div class="field"><label>Nome do gerente</label><input type="text" name="nome" value="{{ gerente.nome if gerente else '' }}" required></div>
+      <div class="field"><label>Loja / unidade</label><input type="text" name="loja" value="{{ gerente.loja if gerente else '' }}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Teto de premiação (R$)</label><input type="number" step="0.01" name="teto" value="{{ gerente.teto if gerente else 3000 }}" required></div>
+      <div class="field"><label>Peso Bloco A — Financeiro (%)</label><input type="number" step="1" name="peso_a" value="{{ gerente.peso_a if gerente else 50 }}" required></div>
+      <div class="field"><label>Peso Bloco B — Processos (%)</label><input type="number" step="1" name="peso_b" value="{{ gerente.peso_b if gerente else 30 }}" required></div>
+      <div class="field"><label>Peso Bloco C — Pessoas (%)</label><input type="number" step="1" name="peso_c" value="{{ gerente.peso_c if gerente else 20 }}" required></div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" type="submit">Salvar</button>
+      <a class="btn btn-secondary" href="{{ url_for('gerentes') }}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

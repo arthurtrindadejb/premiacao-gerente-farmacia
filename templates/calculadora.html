@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block titulo %}Calculadora — {{ gerente.nome }} — {{ mes }}{% endblock %}
+{% block header_titulo %}{{ gerente.nome }}{% endblock %}
+{% block header_sub %}{{ gerente.loja }} · {{ mes_label }}{% endblock %}
+{% block header_extra %}
+  <input type="month" value="{{ mes }}" onchange="window.location='{{ url_for('calculadora', gerente_id=gerente.id, mes='__MES__') }}'.replace('__MES__', this.value)" style="border-radius:6px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:white;padding:6px 8px;font-size:12px;">
+  <button class="btn-print no-print" onclick="window.print()">Imprimir / PDF</button>
+  <a class="sair" href="{{ url_for('gerentes') }}">Voltar</a>
+{% endblock %}
+{% block conteudo %}
+
+{% if ja_salvo %}
+  <div class="flash">Mês já salvo em {{ atualizado_em }} — os valores abaixo refletem o que está gravado. Altere e clique em "Salvar mês" para atualizar.</div>
+{% else %}
+  <div class="flash">Rascunho — este mês ainda não foi salvo. Preencha os realizados e clique em "Salvar mês".</div>
+{% endif %}
+
+<div class="result-panel">
+  <div class="result-top">
+    <div>
+      <div class="result-name">{{ gerente.nome }}</div>
+      <div class="result-sub">{{ gerente.loja }} · {{ mes_label }}</div>
+    </div>
+    <div class="total-badge">
+      <span class="lbl">Premiação do mês</span>
+      <span class="val" id="r-total">R$ 0,00</span>
+    </div>
+  </div>
+  <div class="progress-track"><div class="progress-fill" id="r-prog" style="width:0%"></div></div>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--gray-600);margin-bottom:8px;">
+    <span>R$ 0</span><span id="r-pct">0% do teto</span><span id="r-teto-lbl">R$ 0</span>
+  </div>
+  <div class="bloco-row"><span style="color:var(--gray-600);">Bloco A — Financeiro</span><span style="font-weight:700;color:#1e40af;" id="r-a">R$ 0,00</span></div>
+  <div class="bloco-row"><span style="color:var(--gray-600);">Bloco B — Processos</span><span style="font-weight:700;color:#166534;" id="r-b">R$ 0,00</span></div>
+  <div class="bloco-row"><span style="color:var(--gray-600);">Bloco C — Pessoas</span><span style="font-weight:700;color:#854d0e;" id="r-c">R$ 0,00</span></div>
+  <div id="r-alerts"></div>
+</div>
+
+{% for bloco, titulo, classe, cor_footer, cor_txt in [
+  ('A','Bloco A — Resultado financeiro','ba','var(--brand-light)','var(--brand)'),
+  ('B','Bloco B — Processos e organização','bb','#f0fdf4','#166534'),
+  ('C','Bloco C — Gestão de pessoas','bc','#fef9c3','#854d0e')] %}
+<div class="section-title">{{ titulo }}</div>
+<div class="bloco-card">
+  <div class="bloco-header">
+    <div class="bloco-header-left">
+      <div class="title">Indicadores do bloco {{ bloco }}</div>
+      <div class="sub">Teto: <span id="h-{{ bloco }}">R$ 0</span></div>
+    </div>
+    <span class="bloco-badge {{ classe }}">Peso: {{ gerente['peso_' + bloco.lower()] }}%</span>
+  </div>
+  <div class="kpi-wrap">
+    <table class="kt">
+      <thead>
+        <tr><th>Indicador</th><th>Meta</th><th>Peso %</th><th>Realizado</th><th>% Atingido</th><th>Prêmio calc.</th><th class="td-status no-print">St.</th></tr>
+      </thead>
+      <tbody id="tbody-{{ bloco }}"></tbody>
+    </table>
+  </div>
+  <div class="bloco-footer" style="background:{{ cor_footer }};">
+    <span style="color:{{ cor_txt }};">Total Bloco {{ bloco }}</span>
+    <span style="color:{{ cor_txt }};font-size:14px;" id="total-{{ bloco }}">R$ 0,00</span>
+  </div>
+</div>
+{% endfor %}
+
+<div class="gate-panel no-print">
+  <div class="gate-header">⚠ Cortes disciplinares — ative se aplicável no mês</div>
+  <div class="gate-row">
+    <div class="gate-desc">Advertência formal registrada <strong style="color:#c2410c;">(−30% sobre o total)</strong></div>
+    <label class="sw-wrap"><input type="checkbox" id="g-adv" onchange="atualizar()"><span class="sw"></span></label>
+  </div>
+  <div class="gate-row">
+    <div class="gate-desc">Desvio de conduta comprovado <strong style="color:#c2410c;">(premiação zerada)</strong></div>
+    <label class="sw-wrap"><input type="checkbox" id="g-dev" onchange="atualizar()"><span class="sw"></span></label>
+  </div>
+</div>
+
+<div class="resumo-card">
+  <div class="resumo-title">
+    <div class="nome">{{ gerente.nome }}</div>
+    <div class="sub">{{ gerente.loja }} · {{ mes_label }}</div>
+  </div>
+  <div class="resumo-blocos">
+    <div class="resumo-bloco"><div class="lbl">Bloco A</div><div class="val" style="color:#1e40af;" id="p-a">R$ 0,00</div></div>
+    <div class="resumo-bloco"><div class="lbl">Bloco B</div><div class="val" style="color:#166534;" id="p-b">R$ 0,00</div></div>
+    <div class="resumo-bloco"><div class="lbl">Bloco C</div><div class="val" style="color:#854d0e;" id="p-c">R$ 0,00</div></div>
+  </div>
+  <div class="resumo-total-row">
+    <span class="lbl">Total a pagar</span>
+    <span class="val" id="p-total">R$ 0,00</span>
+  </div>
+  <div class="assinaturas">
+    <div class="assin"><div class="hint">Gestor responsável</div><div class="linha">Assinatura e carimbo</div></div>
+    <div class="assin"><div class="hint">Gerente</div><div class="linha">Recebi ciente</div></div>
+  </div>
+</div>
+
+<div class="no-print" style="margin-top:1rem;display:flex;gap:8px;">
+  <button class="btn btn-primary" onclick="salvar()">Salvar mês</button>
+  <span id="msg-salvar" style="align-self:center;font-size:12px;color:var(--gray-600);"></span>
+</div>
+
+<script>
+const CSRF_TOKEN = "{{ csrf_token() }}";
+const SALVAR_URL = "{{ url_for('calculadora_salvar', gerente_id=gerente.id, mes=mes) }}";
+const gerenteInfo = {{ gerente_json|safe }};
+const itens = {{ itens_json|safe }};
+let advertencia = {{ 'true' if advertencia else 'false' }};
+let desvio = {{ 'true' if desvio else 'false' }};
+</script>
+<script src="{{ url_for('static', filename='calculadora.js') }}"></script>
+{% endblock %}

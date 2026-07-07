@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block titulo %}Admin — Clientes{% endblock %}
+{% block header_titulo %}Painel do Administrador{% endblock %}
+{% block header_sub %}Gestão de clientes da plataforma{% endblock %}
+{% block conteudo %}
+<div class="card">
+  <h2>{% if editar %}Editar cliente{% else %}Novo cliente{% endif %}</h2>
+  <form method="post" action="{{ url_for('admin_cliente_editar', cliente_id=editar.id) if editar else url_for('admin_cliente_novo') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field-row">
+      <div class="field"><label>Nome do cliente</label><input type="text" name="nome" value="{{ editar.nome if editar else '' }}" required></div>
+      <div class="field"><label>Login</label><input type="text" name="login" value="{{ editar.login if editar else '' }}" required></div>
+      <div class="field"><label>Senha {% if editar %}(deixe em branco para manter a atual){% endif %}</label><input type="password" name="senha" {% if not editar %}required{% endif %}></div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" type="submit">{% if editar %}Salvar{% else %}Criar cliente{% endif %}</button>
+      {% if editar %}<a class="btn btn-secondary" href="{{ url_for('admin_clientes') }}">Cancelar</a>{% endif %}
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Clientes cadastrados</h2>
+  <table class="lista">
+    <thead><tr><th>Nome</th><th>Login</th><th>Gerentes</th><th>Status</th><th class="acoes"></th></tr></thead>
+    <tbody>
+    {% for c in clientes %}
+      <tr>
+        <td>{{ c.nome }}</td>
+        <td>{{ c.login }}</td>
+        <td>{{ c.total_gerentes }}</td>
+        <td><span class="badge {{ 'badge-ativo' if c.ativo else 'badge-inativo' }}">{{ 'Ativo' if c.ativo else 'Inativo' }}</span></td>
+        <td class="acoes">
+          <a class="btn btn-secondary btn-sm" href="{{ url_for('admin_cliente_editar', cliente_id=c.id) }}">Editar</a>
+          <form style="display:inline;" method="post" action="{{ url_for('admin_cliente_desativar', cliente_id=c.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm {{ 'btn-danger' if c.ativo else 'btn-secondary' }}" type="submit">{{ 'Desativar' if c.ativo else 'Reativar' }}</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" style="color:var(--gray-600);">Nenhum cliente cadastrado ainda.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

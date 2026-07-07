@@ -1,0 +1,499 @@
+import json
+import os
+from datetime import date
+
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from flask_wtf import CSRFProtect
+from werkzeug.security import generate_password_hash
+
+from auth import admin_required, login_required, verificar_login
+from calculo import calcular_mes
+from db import db
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "1") == "1"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+csrf = CSRFProtect(app)
+
+MESES_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+
+def mes_label(mes):
+    ano, mo = mes.split("-")
+    return f"{MESES_PT[int(mo) - 1]} / {ano}"
+
+
+def carregar_gerente(conn, gerente_id):
+    row = conn.execute(
+        "SELECT * FROM gerentes WHERE id = %s AND cliente_id = %s",
+        (gerente_id, session["cliente_id"]),
+    ).fetchone()
+    if not row:
+        abort(404)
+    gerente = dict(row)
+    for campo in ("teto", "peso_a", "peso_b", "peso_c"):
+        gerente[campo] = float(gerente[campo])
+    return gerente
+
+
+# ───────────────────────── início / auth ─────────────────────────
+
+@app.route("/")
+def index():
+    if session.get("is_admin"):
+        return redirect(url_for("admin_clientes"))
+    if session.get("cliente_id"):
+        return redirect(url_for("gerentes"))
+    return redirect(url_for("login"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        tipo, cliente = verificar_login(
+            request.form.get("login", "").strip(), request.form.get("senha", "")
+        )
+        if tipo == "admin":
+            session.clear()
+            session["is_admin"] = True
+            return redirect(url_for("admin_clientes"))
+        if tipo == "cliente":
+            session.clear()
+            session["cliente_id"] = cliente["id"]
+            session["cliente_nome"] = cliente["nome"]
+            return redirect(url_for("gerentes"))
+        flash("Usuário ou senha inválidos.", "erro")
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+# ───────────────────────── admin (super-admin) ─────────────────────────
+
+@app.route("/admin")
+@admin_required
+def admin_clientes():
+    conn = db()
+    try:
+        clientes = conn.execute(
+            """
+            SELECT c.*, COUNT(g.id) FILTER (WHERE g.ativo) AS total_gerentes
+            FROM clientes c
+            LEFT JOIN gerentes g ON g.cliente_id = c.id
+            GROUP BY c.id ORDER BY c.nome
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template("admin_clientes.html", clientes=clientes, editar=None)
+
+
+@app.route("/admin/clientes/novo", methods=["POST"])
+@admin_required
+def admin_cliente_novo():
+    nome = request.form["nome"].strip()
+    login_ = request.form["login"].strip()
+    senha = request.form["senha"]
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO clientes (nome, login, senha_hash) VALUES (%s, %s, %s)",
+            (nome, login_, generate_password_hash(senha, method="pbkdf2:sha256")),
+        )
+    flash("Cliente criado.")
+    return redirect(url_for("admin_clientes"))
+
+
+@app.route("/admin/clientes/<int:cliente_id>/editar", methods=["GET", "POST"])
+@admin_required
+def admin_cliente_editar(cliente_id):
+    conn = db()
+    try:
+        if request.method == "POST":
+            nome = request.form["nome"].strip()
+            login_ = request.form["login"].strip()
+            senha = request.form.get("senha", "").strip()
+            if senha:
+                conn.execute(
+                    "UPDATE clientes SET nome=%s, login=%s, senha_hash=%s WHERE id=%s",
+                    (nome, login_, generate_password_hash(senha, method="pbkdf2:sha256"), cliente_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE clientes SET nome=%s, login=%s WHERE id=%s",
+                    (nome, login_, cliente_id),
+                )
+            conn.commit()
+            flash("Cliente atualizado.")
+            return redirect(url_for("admin_clientes"))
+
+        editar = conn.execute("SELECT * FROM clientes WHERE id=%s", (cliente_id,)).fetchone()
+        if not editar:
+            abort(404)
+        clientes = conn.execute(
+            """
+            SELECT c.*, COUNT(g.id) FILTER (WHERE g.ativo) AS total_gerentes
+            FROM clientes c
+            LEFT JOIN gerentes g ON g.cliente_id = c.id
+            GROUP BY c.id ORDER BY c.nome
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template("admin_clientes.html", clientes=clientes, editar=editar)
+
+
+@app.route("/admin/clientes/<int:cliente_id>/desativar", methods=["POST"])
+@admin_required
+def admin_cliente_desativar(cliente_id):
+    with db() as conn:
+        conn.execute("UPDATE clientes SET ativo = NOT ativo WHERE id=%s", (cliente_id,))
+    return redirect(url_for("admin_clientes"))
+
+
+# ───────────────────────── gerentes (por cliente) ─────────────────────────
+
+@app.route("/gerentes")
+@login_required
+def gerentes():
+    conn = db()
+    try:
+        lista = conn.execute(
+            "SELECT * FROM gerentes WHERE cliente_id=%s ORDER BY nome",
+            (session["cliente_id"],),
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template("gerentes.html", gerentes=lista)
+
+
+@app.route("/gerentes/novo", methods=["GET", "POST"])
+@login_required
+def gerente_novo():
+    if request.method == "POST":
+        with db() as conn:
+            conn.execute(
+                """INSERT INTO gerentes (cliente_id, nome, loja, teto, peso_a, peso_b, peso_c)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    session["cliente_id"],
+                    request.form["nome"].strip(),
+                    request.form.get("loja", "").strip(),
+                    float(request.form["teto"]),
+                    float(request.form["peso_a"]),
+                    float(request.form["peso_b"]),
+                    float(request.form["peso_c"]),
+                ),
+            )
+        flash("Gerente criado.")
+        return redirect(url_for("gerentes"))
+    return render_template("gerente_form.html", gerente=None)
+
+
+@app.route("/gerentes/<int:gerente_id>/editar", methods=["GET", "POST"])
+@login_required
+def gerente_editar(gerente_id):
+    conn = db()
+    try:
+        gerente = carregar_gerente(conn, gerente_id)
+        if request.method == "POST":
+            conn.execute(
+                """UPDATE gerentes SET nome=%s, loja=%s, teto=%s, peso_a=%s, peso_b=%s, peso_c=%s
+                   WHERE id=%s AND cliente_id=%s""",
+                (
+                    request.form["nome"].strip(),
+                    request.form.get("loja", "").strip(),
+                    float(request.form["teto"]),
+                    float(request.form["peso_a"]),
+                    float(request.form["peso_b"]),
+                    float(request.form["peso_c"]),
+                    gerente_id,
+                    session["cliente_id"],
+                ),
+            )
+            conn.commit()
+            flash("Gerente atualizado.")
+            return redirect(url_for("gerentes"))
+    finally:
+        conn.close()
+    return render_template("gerente_form.html", gerente=gerente)
+
+
+@app.route("/gerentes/<int:gerente_id>/desativar", methods=["POST"])
+@login_required
+def gerente_desativar(gerente_id):
+    with db() as conn:
+        carregar_gerente(conn, gerente_id)
+        conn.execute(
+            "UPDATE gerentes SET ativo = NOT ativo WHERE id=%s AND cliente_id=%s",
+            (gerente_id, session["cliente_id"]),
+        )
+    return redirect(url_for("gerentes"))
+
+
+# ───────────────────────── indicadores (template vivo) ─────────────────────────
+
+def _linha_indicador(row_or_dict):
+    d = dict(row_or_dict)
+    return {
+        "nome": d["nome"],
+        "meta": float(d["meta"]),
+        "peso": float(d["peso"]),
+        "minimo_pct": float(d["minimo_pct"]),
+        "teto_pct": float(d["teto_pct"]),
+        "mult_min": float(d["mult_min"]),
+        "mult_max": float(d["mult_max"]),
+        "inverso": bool(d["inverso"]),
+        "eh_gatilho": bool(d["eh_gatilho"]),
+    }
+
+
+@app.route("/gerentes/<int:gerente_id>/indicadores", methods=["GET", "POST"])
+@login_required
+def indicadores(gerente_id):
+    conn = db()
+    try:
+        gerente = carregar_gerente(conn, gerente_id)
+
+        if request.method == "POST":
+            novos = []
+            for bloco in ("A", "B", "C"):
+                bruto = json.loads(request.form.get(f"itens_{bloco}", "[]"))
+                for ordem, item in enumerate(bruto):
+                    novos.append(
+                        (
+                            gerente_id,
+                            bloco,
+                            ordem,
+                            str(item.get("nome", "")).strip() or "Indicador",
+                            float(item.get("meta", 0) or 0),
+                            float(item.get("peso", 0) or 0),
+                            bool(item.get("inverso", False)),
+                            bool(item.get("eh_gatilho", False)),
+                            float(item.get("minimo_pct", 85) or 0),
+                            float(item.get("teto_pct", 110) or 0),
+                            float(item.get("mult_min", 0.70) or 0),
+                            float(item.get("mult_max", 1.20) or 0),
+                        )
+                    )
+            conn.execute("DELETE FROM indicadores WHERE gerente_id=%s", (gerente_id,))
+            for linha in novos:
+                conn.execute(
+                    """INSERT INTO indicadores
+                       (gerente_id, bloco, ordem, nome, meta, peso, inverso, eh_gatilho,
+                        minimo_pct, teto_pct, mult_min, mult_max)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    linha,
+                )
+            conn.commit()
+            flash("Indicadores salvos.")
+            return redirect(url_for("indicadores", gerente_id=gerente_id))
+
+        linhas = conn.execute(
+            "SELECT * FROM indicadores WHERE gerente_id=%s ORDER BY bloco, ordem, id",
+            (gerente_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    por_bloco = {"A": [], "B": [], "C": []}
+    for linha in linhas:
+        por_bloco[linha["bloco"]].append(_linha_indicador(linha))
+
+    return render_template(
+        "indicadores.html", gerente=gerente, indicadores_json=json.dumps(por_bloco)
+    )
+
+
+# ───────────────────────── calculadora do mês ─────────────────────────
+
+@app.route("/gerentes/<int:gerente_id>/mes")
+@login_required
+def calculadora_mes_atual(gerente_id):
+    return redirect(url_for("calculadora", gerente_id=gerente_id, mes=date.today().strftime("%Y-%m")))
+
+
+@app.route("/gerentes/<int:gerente_id>/mes/<mes>")
+@login_required
+def calculadora(gerente_id, mes):
+    conn = db()
+    try:
+        gerente = carregar_gerente(conn, gerente_id)
+        calculo = conn.execute(
+            "SELECT * FROM calculos WHERE gerente_id=%s AND mes=%s", (gerente_id, mes)
+        ).fetchone()
+
+        if calculo:
+            gerente_calc = dict(gerente)
+            gerente_calc.update(
+                {
+                    "teto": float(calculo["teto"]),
+                    "peso_a": float(calculo["peso_a"]),
+                    "peso_b": float(calculo["peso_b"]),
+                    "peso_c": float(calculo["peso_c"]),
+                }
+            )
+            itens_rows = conn.execute(
+                "SELECT * FROM calculo_itens WHERE calculo_id=%s ORDER BY bloco, ordem, id",
+                (calculo["id"],),
+            ).fetchall()
+            itens_por_bloco = {"A": [], "B": [], "C": []}
+            for row in itens_rows:
+                item = _linha_indicador(row)
+                item["realizado"] = float(row["realizado"])
+                itens_por_bloco[row["bloco"]].append(item)
+            ja_salvo = True
+            atualizado_em = calculo["atualizado_em"].strftime("%d/%m/%Y %H:%M")
+            advertencia = calculo["advertencia"]
+            desvio = calculo["desvio"]
+        else:
+            gerente_calc = dict(gerente)
+            linhas = conn.execute(
+                "SELECT * FROM indicadores WHERE gerente_id=%s ORDER BY bloco, ordem, id",
+                (gerente_id,),
+            ).fetchall()
+            itens_por_bloco = {"A": [], "B": [], "C": []}
+            for linha in linhas:
+                item = _linha_indicador(linha)
+                item["realizado"] = 0.0
+                itens_por_bloco[linha["bloco"]].append(item)
+            ja_salvo = False
+            atualizado_em = None
+            advertencia = False
+            desvio = False
+    finally:
+        conn.close()
+
+    return render_template(
+        "calculadora.html",
+        gerente=gerente_calc,
+        mes=mes,
+        mes_label=mes_label(mes),
+        ja_salvo=ja_salvo,
+        atualizado_em=atualizado_em,
+        gerente_json=json.dumps(
+            {
+                "teto": gerente_calc["teto"],
+                "peso_a": gerente_calc["peso_a"],
+                "peso_b": gerente_calc["peso_b"],
+                "peso_c": gerente_calc["peso_c"],
+            }
+        ),
+        itens_json=json.dumps(itens_por_bloco),
+        advertencia=advertencia,
+        desvio=desvio,
+    )
+
+
+@app.route("/gerentes/<int:gerente_id>/mes/<mes>/salvar", methods=["POST"])
+@login_required
+def calculadora_salvar(gerente_id, mes):
+    payload = request.get_json(silent=True) or {}
+    itens_enviados = payload.get("itens", {})
+    advertencia = bool(payload.get("advertencia", False))
+    desvio = bool(payload.get("desvio", False))
+
+    conn = db()
+    try:
+        gerente = carregar_gerente(conn, gerente_id)
+
+        itens_por_bloco = {"A": [], "B": [], "C": []}
+        for bloco in ("A", "B", "C"):
+            for ordem, item in enumerate(itens_enviados.get(bloco, [])):
+                itens_por_bloco[bloco].append(
+                    {
+                        "ordem": ordem,
+                        "nome": str(item.get("nome", "")).strip() or "Indicador",
+                        "meta": float(item.get("meta", 0) or 0),
+                        "peso": float(item.get("peso", 0) or 0),
+                        "inverso": bool(item.get("inverso", False)),
+                        "eh_gatilho": bool(item.get("eh_gatilho", False)),
+                        "minimo_pct": float(item.get("minimo_pct", 85) or 0),
+                        "teto_pct": float(item.get("teto_pct", 110) or 0),
+                        "mult_min": float(item.get("mult_min", 0.70) or 0),
+                        "mult_max": float(item.get("mult_max", 1.20) or 0),
+                        "realizado": float(item.get("realizado", 0) or 0),
+                    }
+                )
+
+        resultado = calcular_mes(gerente, itens_por_bloco, advertencia, desvio)
+
+        calculo = conn.execute(
+            "SELECT id FROM calculos WHERE gerente_id=%s AND mes=%s", (gerente_id, mes)
+        ).fetchone()
+
+        if calculo:
+            calculo_id = calculo["id"]
+            conn.execute(
+                """UPDATE calculos SET teto=%s, peso_a=%s, peso_b=%s, peso_c=%s,
+                       advertencia=%s, desvio=%s, total_a=%s, total_b=%s, total_c=%s,
+                       total=%s, atualizado_em=now()
+                   WHERE id=%s""",
+                (
+                    gerente["teto"], gerente["peso_a"], gerente["peso_b"], gerente["peso_c"],
+                    advertencia, desvio,
+                    resultado["total_a"], resultado["total_b"], resultado["total_c"],
+                    resultado["total"], calculo_id,
+                ),
+            )
+            conn.execute("DELETE FROM calculo_itens WHERE calculo_id=%s", (calculo_id,))
+        else:
+            row = conn.execute(
+                """INSERT INTO calculos
+                       (gerente_id, mes, teto, peso_a, peso_b, peso_c, advertencia, desvio,
+                        total_a, total_b, total_c, total)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (
+                    gerente_id, mes, gerente["teto"], gerente["peso_a"], gerente["peso_b"], gerente["peso_c"],
+                    advertencia, desvio,
+                    resultado["total_a"], resultado["total_b"], resultado["total_c"], resultado["total"],
+                ),
+            ).fetchone()
+            calculo_id = row["id"]
+
+        for bloco in ("A", "B", "C"):
+            premios = resultado["premios"][bloco]
+            for item, premio in zip(itens_por_bloco[bloco], premios):
+                conn.execute(
+                    """INSERT INTO calculo_itens
+                           (calculo_id, bloco, ordem, nome, meta, peso, inverso, eh_gatilho,
+                            minimo_pct, teto_pct, mult_min, mult_max, realizado, premio_calculado)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (
+                        calculo_id, bloco, item["ordem"], item["nome"], item["meta"], item["peso"],
+                        item["inverso"], item["eh_gatilho"], item["minimo_pct"], item["teto_pct"],
+                        item["mult_min"], item["mult_max"], item["realizado"], premio,
+                    ),
+                )
+
+        conn.commit()
+        return jsonify({"ok": True, "total": resultado["total"]})
+    except Exception as exc:  # noqa: BLE001
+        conn.rollback()
+        return jsonify({"erro": str(exc)}), 400
+    finally:
+        conn.close()
+
+
+# ───────────────────────── histórico ─────────────────────────
+
+@app.route("/gerentes/<int:gerente_id>/historico")
+@login_required
+def historico(gerente_id):
+    conn = db()
+    try:
+        gerente = carregar_gerente(conn, gerente_id)
+        calculos = conn.execute(
+            "SELECT * FROM calculos WHERE gerente_id=%s ORDER BY mes DESC", (gerente_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return render_template("historico.html", gerente=gerente, calculos=calculos)
+
+
+if __name__ == "__main__":
+    app.run(debug=True)

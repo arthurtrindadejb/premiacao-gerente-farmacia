@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block titulo %}Indicadores — {{ gerente.nome }}{% endblock %}
+{% block header_titulo %}{{ gerente.nome }}{% endblock %}
+{% block header_sub %}{{ gerente.loja }} · Cadastro de indicadores{% endblock %}
+{% block conteudo %}
+
+<div class="legenda-bar no-print">
+  <div class="legenda-item"><div class="lb lb-val"></div> Meta = valor esperado do indicador</div>
+  <div class="legenda-item"><div class="lb lb-pct"></div> Peso % = fatia do teto do bloco</div>
+  <div class="legenda-item"><div class="lb lb-cfg"></div> Mín/Teto/Mult = curva de premiação (editável)</div>
+  <div class="legenda-item" style="margin-left:auto;"><span style="color:#aaa;font-size:10px;">Gatilho: se cair abaixo do Mín%, zera o bloco inteiro</span></div>
+</div>
+
+<form method="post" id="form-indicadores">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  {% for bloco, titulo, classe in [('A','Bloco A — Resultado financeiro','ba'), ('B','Bloco B — Processos e organização','bb'), ('C','Bloco C — Gestão de pessoas','bc')] %}
+  <div class="section-title">{{ titulo }}</div>
+  <div class="bloco-card">
+    <div class="bloco-header">
+      <div class="bloco-header-left">
+        <div class="title">Indicadores do bloco {{ bloco }}</div>
+        <div class="sub" id="soma-peso-{{ bloco }}"></div>
+      </div>
+      <span class="bloco-badge {{ classe }}">Peso {{ bloco }}: {{ gerente['peso_' + bloco.lower()] }}%</span>
+    </div>
+    <div class="kpi-wrap">
+      <table class="kt">
+        <thead>
+          <tr>
+            <th>Indicador</th>
+            <th>Meta</th>
+            <th>Peso %</th>
+            <th>Mín %</th>
+            <th>Teto %</th>
+            <th>Mult mín</th>
+            <th>Mult máx</th>
+            <th>Inverso</th>
+            <th>Gatilho</th>
+            <th class="td-del no-print"></th>
+          </tr>
+        </thead>
+        <tbody id="tbody-{{ bloco }}"></tbody>
+      </table>
+    </div>
+    <button class="btn-add no-print" type="button" onclick="addRow('{{ bloco }}')">+ Adicionar indicador</button>
+  </div>
+  <input type="hidden" name="itens_{{ bloco }}" id="itens_{{ bloco }}">
+  {% endfor %}
+
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-primary" type="submit">Salvar indicadores</button>
+    <a class="btn btn-secondary" href="{{ url_for('gerentes') }}">Voltar</a>
+  </div>
+</form>
+
+<script>
+const dadosIniciais = {{ indicadores_json|safe }};
+let rows = { A: dadosIniciais.A || [], B: dadosIniciais.B || [], C: dadosIniciais.C || [] };
+
+function esc(s) { return String(s).replace(/"/g,'&quot;'); }
+
+function novoIndicador() {
+  return { nome:'Novo indicador', meta:0, peso:0, minimo_pct:85, teto_pct:110, mult_min:0.70, mult_max:1.20, inverso:false, eh_gatilho:false };
+}
+
+function addRow(bloco) {
+  rows[bloco].push(novoIndicador());
+  render(bloco);
+}
+
+function delRow(bloco, i) {
+  rows[bloco].splice(i, 1);
+  render(bloco);
+}
+
+function syncField(bloco, i, campo, valor) {
+  rows[bloco][i][campo] = valor;
+  if (campo === 'peso') atualizaSomaPeso(bloco);
+}
+
+function atualizaSomaPeso(bloco) {
+  const soma = rows[bloco].reduce((s, r) => s + (parseFloat(r.peso) || 0), 0);
+  const el = document.getElementById('soma-peso-' + bloco);
+  if (Math.abs(soma - 100) > 0.01) {
+    el.innerHTML = '<span style="color:var(--warn-txt);font-weight:700;">⚠ Soma dos pesos = ' + soma.toFixed(0) + '% (deveria ser 100%)</span>';
+  } else {
+    el.textContent = 'Soma dos pesos: 100%';
+  }
+}
+
+function render(bloco) {
+  const tbody = document.getElementById('tbody-' + bloco);
+  tbody.innerHTML = '';
+  rows[bloco].forEach((r, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input class="ci ci-name" value="${esc(r.nome)}" oninput="syncField('${bloco}',${i},'nome',this.value)"></td>
+      <td><input class="ci ci-val" type="number" step="0.01" value="${r.meta}" oninput="syncField('${bloco}',${i},'meta',+this.value)"></td>
+      <td><input class="ci ci-pct" type="number" step="1" value="${r.peso}" oninput="syncField('${bloco}',${i},'peso',+this.value)"></td>
+      <td><input class="ci ci-cfg" type="number" step="1" value="${r.minimo_pct}" oninput="syncField('${bloco}',${i},'minimo_pct',+this.value)"></td>
+      <td><input class="ci ci-cfg" type="number" step="1" value="${r.teto_pct}" oninput="syncField('${bloco}',${i},'teto_pct',+this.value)"></td>
+      <td><input class="ci ci-cfg" type="number" step="0.05" value="${r.mult_min}" oninput="syncField('${bloco}',${i},'mult_min',+this.value)"></td>
+      <td><input class="ci ci-cfg" type="number" step="0.05" value="${r.mult_max}" oninput="syncField('${bloco}',${i},'mult_max',+this.value)"></td>
+      <td style="text-align:center;"><input type="checkbox" ${r.inverso?'checked':''} onchange="syncField('${bloco}',${i},'inverso',this.checked)"></td>
+      <td style="text-align:center;"><input type="checkbox" ${r.eh_gatilho?'checked':''} onchange="syncField('${bloco}',${i},'eh_gatilho',this.checked)"></td>
+      <td class="td-del no-print"><button type="button" class="btn-del" onclick="delRow('${bloco}',${i})" title="Remover">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+  atualizaSomaPeso(bloco);
+}
+
+document.getElementById('form-indicadores').addEventListener('submit', function () {
+  ['A','B','C'].forEach(bloco => {
+    document.getElementById('itens_' + bloco).value = JSON.stringify(rows[bloco]);
+  });
+});
+
+['A','B','C'].forEach(render);
+</script>
+{% endblock %}
